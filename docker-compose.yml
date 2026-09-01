@@ -1,0 +1,12 @@
+services:
+  lastsafe:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - lastsafe-data:/data
+
+volumes:
+  lastsafe-data:

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: lastsafe
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: LASTSAFE_MODE
+        value: replay
+      - key: LASTSAFE_DATABASE_PATH
+        value: /tmp/lastsafe.db
+      - key: LASTSAFE_EXECUTION_ENABLED
+        value: "false"

@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="LastSafe autonomously manages the final hours of options spreads on Alpaca paper trading."
+    />
+    <title>LastSafe · Options Expiry Airlock</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='3' fill='%2311130f'/%3E%3Cpath d='M8 22V15M16 22V10M24 22V6' stroke='%23d9ff43' stroke-width='4'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="LastSafe home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>LASTSAFE</span>
+      </a>
+      <nav class="topnav" aria-label="Page sections">
+        <a href="#airlock">Airlock</a>
+        <a href="#evidence">Evidence</a>
+        <a href="#ledger">Ledger</a>
+      </nav>
+      <div class="connection">
+        <span class="pulse"></span>
+        <span id="connectionText">Connecting</span>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">AUTONOMOUS OPTIONS EXPIRY OPERATIONS</p>
+          <h1>The agent that starts<br /><em>after the trade fills.</em></h1>
+          <p class="hero-sub">
+            LastSafe maps every expiring spread to its terminal account states,
+            then chooses
+            <strong>hold, close, or roll</strong> before assignment becomes an
+            accident.
+          </p>
+        </div>
+        <div class="hero-status">
+          <div class="status-orbit">
+            <div class="orbit-ring orbit-one"></div>
+            <div class="orbit-ring orbit-two"></div>
+            <div class="orbit-core">
+              <span id="heroCountdown">01:35</span>
+              <small>TO CLOSE</small>
+            </div>
+            <span class="orbit-node node-a"></span>
+            <span class="orbit-node node-b"></span>
+          </div>
+          <div class="mode-stamp" id="modeStamp">REPLAY MODE</div>
+        </div>
+      </section>
+
+      <section class="ticker-strip" aria-label="Account summary">
+        <div><span>ACCOUNT</span><strong id="accountId">—</strong></div>
+        <div><span>EQUITY</span><strong id="equity">—</strong></div>
+        <div><span>WEEK P&amp;L</span><strong id="totalPnl">—</strong></div>
+        <div><span>MAX DRAWDOWN</span><strong id="drawdown">—</strong></div>
+        <div>
+          <span>OPTIONS LEVEL</span><strong id="optionsLevel">—</strong>
+        </div>
+        <div><span>FEED</span><strong id="feedLabel">—</strong></div>
+      </section>
+
+      <section class="workspace" id="airlock">
+        <aside class="runway-panel panel">
+          <div class="panel-heading">
+            <div>
+              <p class="section-index">01 / EXPIRY RUNWAY</p>
+              <h2>Time is now a position.</h2>
+            </div>
+            <span class="severity" id="severityBadge">WATCH</span>
+          </div>
+
+          <div class="position-card">
+            <div class="position-topline">
+              <div>
+                <span class="micro">OPEN VERTICAL</span>
+                <strong id="positionTitle">—</strong>
+              </div>
+              <div class="position-pnl" id="positionPnl">—</div>
+            </div>
+            <div class="legs" id="legs"></div>
+          </div>
+
+          <div class="runway">
+            <div class="runway-line"><span id="runwayProgress"></span></div>
+            <div class="runway-stops">
+              <div>
+                <i class="done"></i><span>ENTRY</span><b id="entryDate">—</b>
+              </div>
+              <div><i class="done"></i><span>MONITOR</span><b>ACTIVE</b></div>
+              <div>
+                <i class="live"></i><span>AIRLOCK</span
+                ><b id="airlockTime">—</b>
+              </div>
+              <div><i></i><span>EXPIRY</span><b id="expiryDate">—</b></div>
+            </div>
+          </div>
+
+          <div class="terminal-map">
+            <div class="map-header">
+              <span>TERMINAL P&amp;L MAP</span>
+              <span id="spotLabel">SPOT —</span>
+            </div>
+            <div
+              class="payoff-chart"
+              id="payoffChart"
+              aria-label="Terminal payoff chart"
+            ></div>
+            <div class="map-axis">
+              <span>RISK-OFF</span><span>SHORT STRIKE</span><span>CLEAR</span>
+            </div>
+          </div>
+        </aside>
+
+        <section class="controls-panel panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="section-index">02 / INCIDENT SIMULATOR</p>
+              <h2>Stress the landing.</h2>
+            </div>
+            <button class="reset-button" id="resetScenario" type="button">
+              RESET
+            </button>
+          </div>
+
+          <label class="control-row" for="spotShift">
+            <span>
+              <b>Spot displacement</b>
+              <small>Move the underlying through the short strike</small>
+            </span>
+            <output id="spotShiftValue">0.0%</output>
+          </label>
+          <input
+            id="spotShift"
+            type="range"
+            min="-3"
+            max="3"
+            step="0.1"
+            value="0"
+          />
+
+          <label class="control-row" for="buyingPower">
+            <span>
+              <b>Buying-power reserve</b>
+              <small>Simulate capital consumed elsewhere</small>
+            </span>
+            <output id="buyingPowerValue">100%</output>
+          </label>
+          <input
+            id="buyingPower"
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value="100"
+          />
+
+          <label class="control-row" for="minutesClose">
+            <span>
+              <b>Minutes to close</b>
+              <small>Enter Alpaca's final expiry window</small>
+            </span>
+            <output id="minutesCloseValue">95 min</output>
+          </label>
+          <input
+            id="minutesClose"
+            type="range"
+            min="5"
+            max="240"
+            step="5"
+            value="95"
+          />
+
+          <div class="exposure-card">
+            <div>
+              <span>SHORT CLEARANCE</span><strong id="shortDistance">—</strong>
+            </div>
+            <div>
+              <span>ASSIGNMENT NOTIONAL</span
+              ><strong id="assignmentNotional">—</strong>
+            </div>
+            <div>
+              <span>OPTIONS BUYING POWER</span><strong id="optionsBp">—</strong>
+            </div>
+          </div>
+
+          <div class="gate-list" id="gateList"></div>
+        </section>
+      </section>
+
+      <section class="decision-section" id="evidence">
+        <div class="section-title-row">
+          <div>
+            <p class="section-index">03 / DECISION SURFACE</p>
+            <h2>Three legal exits. One survivable state.</h2>
+          </div>
+          <p class="section-note">
+            LLM chooses only from actions already cleared by deterministic
+            policy.
+          </p>
+        </div>
+        <div class="decision-grid" id="decisionGrid"></div>
+
+        <div class="agent-console">
+          <div class="console-header">
+            <div>
+              <span class="console-dot"></span>
+              <span>LASTSAFE AGENT</span>
+            </div>
+            <span id="agentModel">POLICY STANDBY</span>
+          </div>
+          <div class="console-body">
+            <div class="agent-verdict">
+              <span>RECOMMENDED ACTION</span>
+              <strong id="agentAction">RUN AGENT</strong>
+            </div>
+            <div class="agent-reasoning" id="agentReasoning">
+              Adjust the incident conditions, then run the autonomous airlock
+              decision.
+            </div>
+            <div class="console-actions">
+              <label class="execute-toggle">
+                <input id="executeToggle" type="checkbox" />
+                <span></span>
+                SIMULATE PAPER ORDER
+              </label>
+              <button class="run-button" id="runAgent" type="button">
+                <span>RUN AIRLOCK</span>
+                <i>↗</i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="evidence-section">
+        <div class="section-title-row">
+          <div>
+            <p class="section-index">04 / ALPACA EVIDENCE</p>
+            <h2>No invisible execution.</h2>
+          </div>
+          <div class="stack-pills">
+            <span>TRADING API</span><span>MARKET DATA</span><span>CLI</span
+            ><span>PAPER</span>
+          </div>
+        </div>
+        <div class="evidence-grid">
+          <article class="evidence-card chart-card">
+            <div class="card-label">
+              <span>ACCOUNT EQUITY</span><b id="equityDelta">—</b>
+            </div>
+            <svg
+              id="equityChart"
+              viewBox="0 0 620 180"
+              role="img"
+              aria-label="Account equity curve"
+            ></svg>
+          </article>
+          <article class="evidence-card receipt-card">
+            <div class="card-label">
+              <span>CLI ORDER RECEIPT</span><b id="receiptStatus">WAITING</b>
+            </div>
+            <pre id="receiptOutput"><code>$ alpaca order submit
+# Run the airlock to construct a paper-only payload.</code></pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="ledger-section" id="ledger">
+        <div class="section-title-row">
+          <div>
+            <p class="section-index">05 / RESTART-SAFE LEDGER</p>
+            <h2>The broker is truth. The journal remembers.</h2>
+          </div>
+          <div class="ledger-proof">
+            <span id="chainStatus">VERIFYING</span><b id="chainHash">—</b>
+          </div>
+        </div>
+        <div class="ledger-table" id="ledgerTable">
+          <div class="ledger-empty">No airlock runs recorded yet.</div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div>
+        <strong>LASTSAFE</strong>
+        <span
+          >Autonomous options expiry operations on Alpaca paper trading.</span
+        >
+      </div>
+      <p>
+        Educational prototype. Paper results are hypothetical and do not
+        guarantee future performance. Not investment advice.
+      </p>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>
