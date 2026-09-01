@@ -51,3 +51,9 @@ Use the development account, not the competition account:
 - Verify repository, demo, video, and deck links in an incognito browser.
 - Confirm the submitted Alpaca account ID is correct.
 - Submit before `2026-09-04T15:00:00Z`; do not depend on manual grace periods.
+
+Current public artifacts:
+
+- Repository: <https://github.com/qybaihe/lastsafe>
+- Interactive replay: <https://qybaihe.github.io/lastsafe/>
+- CI and image build: <https://github.com/qybaihe/lastsafe/actions>

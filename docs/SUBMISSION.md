@@ -44,12 +44,12 @@ Management, Web Application
 
 ## URLs To Fill
 
-- Public GitHub repository: `[TODO]`
-- Online demo: `[TODO]`
+- Public GitHub repository: <https://github.com/qybaihe/lastsafe>
+- Online demo: <https://qybaihe.github.io/lastsafe/>
 - Video presentation: `[TODO]`
 - Slide presentation: `[TODO]`
 - Alpaca paper account ID: `[TODO - submit privately in the required field]`
-- Technical one-pager: `docs/TECHNICAL_WRITEUP.md` or exported PDF
+- Technical one-pager: <https://github.com/qybaihe/lastsafe/blob/main/docs/TECHNICAL_WRITEUP.md>
 - Social post 1: `[TODO]`
 - Social post 2: `[TODO]`
 - Social post 3: `[TODO]`
@@ -60,11 +60,11 @@ Management, Web Application
 
 - [ ] Every team member is registered and approved on lablab.ai.
 - [ ] Team has 1-6 members and the project is under Options Alpha Agents.
-- [ ] Public repository is MIT licensed and contains no secrets.
+- [x] Public repository is MIT licensed and contains no secrets.
 - [ ] Dedicated fresh Alpaca paper account started at exactly `$100,000`.
 - [ ] Submitted account ID matches the account used by the agent.
 - [ ] At least one genuine options order lifecycle is captured on that account.
-- [ ] Demo URL is public, stable, and defaults to labeled replay/read-only mode.
+- [x] Demo URL is public, stable, and defaults to labeled replay/read-only mode.
 - [ ] Video is no more than five minutes.
 - [ ] Pitch deck is exported to PDF.
 - [ ] One-page AI logic, risk gate, and infrastructure write-up is attached/exported.
