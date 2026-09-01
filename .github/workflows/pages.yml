@@ -1,0 +1,38 @@
+name: Deploy Replay Demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Assemble static replay
+        run: |
+          mkdir -p _site
+          cp src/lastsafe/static/index.html _site/index.html
+          cp src/lastsafe/static/app.js _site/app.js
+          cp src/lastsafe/static/styles.css _site/styles.css
+          cp src/lastsafe/static/replay.json _site/replay.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

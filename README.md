@@ -10,6 +10,8 @@ CLI. Every decision and receipt enters a restart-safe, hash-linked ledger.
 
 Built for the [Alpaca AI Trading Agents Hackathon](https://lablab.ai/ai-hackathons/alpaca-ai-trading-agents-hackathon).
 
+**[Launch the interactive replay demo](https://qybaihe.github.io/lastsafe/)**
+
 ![Paper only](https://img.shields.io/badge/execution-paper%20only-367647)
 ![Python](https://img.shields.io/badge/python-3.11%2B-11130f)
 ![License](https://img.shields.io/badge/license-MIT-ff6534)

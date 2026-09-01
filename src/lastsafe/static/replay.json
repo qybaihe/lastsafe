@@ -1,0 +1,119 @@
+{
+  "source": "replay",
+  "source_label": "Seeded expiry incident | indicative-style quotes | not live P&L",
+  "as_of": "2026-09-04T18:25:00Z",
+  "market_open": true,
+  "minutes_to_close": 95,
+  "spot": 639.4,
+  "account": {
+    "account_id": "REPLAY-7F2A",
+    "equity": 100482.3,
+    "starting_equity": 100000,
+    "cash": 100340.3,
+    "buying_power": 61800,
+    "options_buying_power": 28500,
+    "options_trading_level": 3,
+    "daily_pnl": -30.3,
+    "total_pnl": 482.3,
+    "max_drawdown_pct": -0.42,
+    "paper": true
+  },
+  "position": {
+    "id": "spy-640-635-260904",
+    "underlying": "SPY",
+    "strategy": "bull_put_credit",
+    "quantity": 1,
+    "opened_at": "2026-08-31T15:42:00Z",
+    "entry_credit": 1.42,
+    "long_leg": {
+      "symbol": "SPY260904P00635000",
+      "position_side": "long",
+      "option_type": "put",
+      "strike": 635,
+      "expiration": "2026-09-04",
+      "quantity": 1,
+      "entry_price": 1.18,
+      "quote": {
+        "bid": 1.48,
+        "ask": 1.58,
+        "timestamp": "2026-09-04T18:25:00Z",
+        "feed": "indicative"
+      },
+      "delta": -0.3,
+      "gamma": 0.021,
+      "theta": -0.24,
+      "vega": 0.09
+    },
+    "short_leg": {
+      "symbol": "SPY260904P00640000",
+      "position_side": "short",
+      "option_type": "put",
+      "strike": 640,
+      "expiration": "2026-09-04",
+      "quantity": 1,
+      "entry_price": 2.6,
+      "quote": {
+        "bid": 2.98,
+        "ask": 3.08,
+        "timestamp": "2026-09-04T18:25:00Z",
+        "feed": "indicative"
+      },
+      "delta": -0.54,
+      "gamma": 0.026,
+      "theta": -0.31,
+      "vega": 0.1
+    }
+  },
+  "roll_candidate": {
+    "underlying": "SPY",
+    "strategy": "bull_put_credit",
+    "quantity": 1,
+    "open_credit": 1.85,
+    "long_leg": {
+      "symbol": "SPY260911P00627000",
+      "position_side": "long",
+      "option_type": "put",
+      "strike": 627,
+      "expiration": "2026-09-11",
+      "quantity": 1,
+      "entry_price": 0,
+      "quote": {
+        "bid": 1.12,
+        "ask": 1.25,
+        "timestamp": "2026-09-04T18:25:00Z",
+        "feed": "indicative"
+      },
+      "delta": -0.2,
+      "gamma": 0.012,
+      "theta": -0.15,
+      "vega": 0.16
+    },
+    "short_leg": {
+      "symbol": "SPY260911P00632000",
+      "position_side": "short",
+      "option_type": "put",
+      "strike": 632,
+      "expiration": "2026-09-11",
+      "quantity": 1,
+      "entry_price": 0,
+      "quote": {
+        "bid": 3.1,
+        "ask": 3.22,
+        "timestamp": "2026-09-04T18:25:00Z",
+        "feed": "indicative"
+      },
+      "delta": -0.28,
+      "gamma": 0.015,
+      "theta": -0.21,
+      "vega": 0.18
+    }
+  },
+  "equity_curve": [
+    { "timestamp": "2026-08-28T20:00:00Z", "equity": 100000 },
+    { "timestamp": "2026-08-31T20:00:00Z", "equity": 100118.4 },
+    { "timestamp": "2026-09-01T20:00:00Z", "equity": 100076.1 },
+    { "timestamp": "2026-09-02T20:00:00Z", "equity": 100294.7 },
+    { "timestamp": "2026-09-03T20:00:00Z", "equity": 100512.6 },
+    { "timestamp": "2026-09-04T18:25:00Z", "equity": 100482.3 }
+  ]
+}

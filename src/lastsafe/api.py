@@ -55,6 +55,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    @app.get("/styles.css", include_in_schema=False)
+    async def styles() -> FileResponse:
+        return FileResponse(STATIC_DIR / "styles.css", media_type="text/css")
+
+    @app.get("/app.js", include_in_schema=False)
+    async def script() -> FileResponse:
+        return FileResponse(STATIC_DIR / "app.js", media_type="text/javascript")
+
+    @app.get("/replay.json", include_in_schema=False)
+    async def replay_fixture() -> FileResponse:
+        return FileResponse(STATIC_DIR / "replay.json", media_type="application/json")
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok", "mode": settings.mode, "paper": "locked"}

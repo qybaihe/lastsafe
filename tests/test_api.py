@@ -26,6 +26,9 @@ def test_replay_api_end_to_end(tmp_path: Path) -> None:
         )
         history = client.get("/api/runs")
         page = client.get("/")
+        script = client.get("/app.js")
+        styles = client.get("/styles.css")
+        fixture = client.get("/replay.json")
 
     assert health.json() == {"status": "ok", "mode": "replay", "paper": "locked"}
     assert bootstrap.status_code == 200
@@ -36,6 +39,9 @@ def test_replay_api_end_to_end(tmp_path: Path) -> None:
     assert len(history.json()) == 1
     assert "The agent that starts" in page.text
     assert "rel=\"icon\"" in page.text
+    assert script.status_code == 200
+    assert styles.status_code == 200
+    assert fixture.json()["source"] == "replay"
 
 
 def test_execution_token_protects_runs_when_enabled(tmp_path: Path) -> None:
