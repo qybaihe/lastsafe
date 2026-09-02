@@ -96,7 +96,7 @@ async function staticRequest(url, options = {}) {
       payload.execute,
       runs,
     );
-    const nextRuns = [record, ...runs].slice(0, 50);
+    const nextRuns = [record, ...runs];
     localStorage.setItem(staticLedgerKey, JSON.stringify(nextRuns));
     return record;
   }
@@ -975,6 +975,10 @@ function renderProof(run) {
 
 async function loadRuns() {
   state.runs = await request("/api/runs?limit=8");
+  if (staticMode) {
+    state.capabilities.audit_chain_length = String(state.runs.length);
+    state.capabilities.audit_chain_valid = await verifyStaticChain(state.runs);
+  }
   renderLedger();
   if (state.capabilities.audit_chain_valid != null) {
     $("#chainStatus").textContent = state.capabilities.audit_chain_valid
