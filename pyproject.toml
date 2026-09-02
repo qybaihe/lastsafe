@@ -25,6 +25,7 @@ dev = [
 
 [project.scripts]
 lastsafe = "lastsafe.main:run"
+lastsafe-worker = "lastsafe.worker:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lastsafe"]

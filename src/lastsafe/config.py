@@ -23,6 +23,12 @@ class Settings:
     llm_api_key: str = ""
     llm_base_url: str = "https://api.featherless.ai/v1"
     llm_model: str = "zai-org/GLM-5.2"
+    expected_account_id: str = ""
+    worker_interval_seconds: int = 300
+    order_timeout_seconds: int = 90
+    order_poll_seconds: float = 2.0
+    evidence_path: Path = Path("data/competition-evidence.json")
+    code_revision: str = "development"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -41,6 +47,14 @@ class Settings:
             llm_api_key=os.getenv("LLM_API_KEY", ""),
             llm_base_url=os.getenv("LLM_BASE_URL", "https://api.featherless.ai/v1"),
             llm_model=os.getenv("LLM_MODEL", "zai-org/GLM-5.2"),
+            expected_account_id=os.getenv("LASTSAFE_EXPECTED_ACCOUNT_ID", ""),
+            worker_interval_seconds=int(os.getenv("LASTSAFE_WORKER_INTERVAL_SECONDS", "300")),
+            order_timeout_seconds=int(os.getenv("LASTSAFE_ORDER_TIMEOUT_SECONDS", "90")),
+            order_poll_seconds=float(os.getenv("LASTSAFE_ORDER_POLL_SECONDS", "2")),
+            evidence_path=Path(
+                os.getenv("LASTSAFE_EVIDENCE_PATH", "data/competition-evidence.json")
+            ),
+            code_revision=os.getenv("LASTSAFE_CODE_REVISION", "development"),
         )
 
     def validate_runtime(self) -> None:
@@ -48,3 +62,9 @@ class Settings:
             raise ValueError("ALPACA_API_KEY and ALPACA_SECRET_KEY are required in alpaca mode")
         if self.execution_enabled and not self.execution_token:
             raise ValueError("LASTSAFE_EXECUTION_TOKEN is required when execution is enabled")
+        if self.mode == "alpaca" and self.execution_enabled and not self.expected_account_id:
+            raise ValueError(
+                "LASTSAFE_EXPECTED_ACCOUNT_ID is required when Alpaca execution is enabled"
+            )
+        if not 15 <= self.worker_interval_seconds <= 3600:
+            raise ValueError("worker interval must be between 15 and 3600 seconds")

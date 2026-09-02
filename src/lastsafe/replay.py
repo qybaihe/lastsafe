@@ -123,6 +123,7 @@ def load_replay_snapshot() -> DeskSnapshot:
             total_pnl=482.30,
             max_drawdown_pct=-0.42,
             paper=True,
+            starting_equity_verified=True,
         ),
         position=position,
         roll_candidate=roll_candidate,

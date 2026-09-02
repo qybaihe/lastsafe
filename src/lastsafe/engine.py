@@ -41,11 +41,15 @@ def parse_occ_symbol(symbol: str) -> ParsedOptionSymbol:
 
 def _spread_width(snapshot: DeskSnapshot) -> float:
     position = snapshot.position
+    if position is None:
+        return 0
     return abs(position.short_leg.strike - position.long_leg.strike)
 
 
 def _payoff(snapshot: DeskSnapshot, terminal_spot: float) -> float:
     position = snapshot.position
+    if position is None:
+        return 0
     quantity = position.quantity
     if position.strategy == "bull_put_credit":
         short_intrinsic = max(position.short_leg.strike - terminal_spot, 0)
@@ -57,6 +61,8 @@ def _payoff(snapshot: DeskSnapshot, terminal_spot: float) -> float:
 
 
 def _short_distance_pct(snapshot: DeskSnapshot, spot: float) -> float:
+    if snapshot.position is None:
+        return 0
     short_strike = snapshot.position.short_leg.strike
     if snapshot.position.strategy == "bull_put_credit":
         return (spot - short_strike) / spot * 100
@@ -68,6 +74,8 @@ def _expiry_dte(expiration: date, as_of_date: date) -> int:
 
 
 def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
+    if snapshot.position is None:
+        return _evaluate_flat(snapshot, scenario)
     position = snapshot.position
     spot = round(snapshot.spot * (1 + scenario.spot_shift_pct / 100), 2)
     buying_power = round(snapshot.account.options_buying_power * scenario.buying_power_pct / 100, 2)
@@ -101,17 +109,34 @@ def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
         and leg.quote.ask >= leg.quote.bid
         for leg in (position.long_leg, position.short_leg)
     )
-    competition_account_ready = abs(snapshot.account.starting_equity - 100_000) < 0.01
+    competition_account_ready = (
+        abs(snapshot.account.starting_equity - 100_000) < 0.01
+        and snapshot.account.starting_equity_verified
+    )
     account_ready = (
         snapshot.account.paper
         and snapshot.account.options_trading_level >= 3
         and competition_account_ready
+        and snapshot.account.status.upper() in {"ACTIVE", "PAPER_ONLY"}
+        and not snapshot.account.trading_blocked
+        and not snapshot.portfolio_issues
+        and snapshot.open_order_count == 0
     )
     market_ready = snapshot.market_open
+    expiry_order_window = not (
+        dte == 0
+        and scenario.minutes_to_close
+        < (35 if position.underlying in {"SPY", "QQQ", "IWM"} else 50)
+    )
     quote_ready = quote_age <= 120 and current_quotes_two_sided
     width_ready = width > 0 and position.long_leg.expiration == position.short_leg.expiration
-    risk_ready = max_loss <= snapshot.account.equity * 0.01
+    risk_ready = 0 < position.entry_credit < width and 0 <= max_loss <= (
+        snapshot.account.equity * 0.01
+    )
     buying_power_ready = buying_power >= max_loss
+    close_funded = buying_power >= close_debit * 100 * position.quantity
+    roll_requirement = roll_max_loss if roll_max_loss is not None else float("inf")
+    roll_funded = buying_power >= roll_requirement
 
     gates = [
         GateResult(
@@ -135,8 +160,12 @@ def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
         GateResult(
             key="market-session",
             label="Options session open",
-            passed=market_ready,
-            detail=f"{scenario.minutes_to_close} minutes until close",
+            passed=market_ready and expiry_order_window,
+            detail=(
+                f"{scenario.minutes_to_close} minutes until close"
+                if expiry_order_window
+                else "Inside the expiry-day order cutoff buffer"
+            ),
         ),
         GateResult(
             key="quote-freshness",
@@ -161,18 +190,26 @@ def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
         ),
     ]
 
-    terminal_spots = [
-        ("risk-off", round(position.long_leg.strike - width, 2)),
-        ("pin-zone", round(position.short_leg.strike, 2)),
-        ("clear", round(position.short_leg.strike + width, 2)),
-    ]
+    terminal_spots = (
+        [
+            ("risk-off", round(position.long_leg.strike - width, 2)),
+            ("pin-zone", round(position.short_leg.strike, 2)),
+            ("clear", round(position.short_leg.strike + width, 2)),
+        ]
+        if position.strategy == "bull_put_credit"
+        else [
+            ("clear", round(position.short_leg.strike - width, 2)),
+            ("pin-zone", round(position.short_leg.strike, 2)),
+            ("risk-off", round(position.long_leg.strike + width, 2)),
+        ]
+    )
     terminal_states = [
         TerminalState(
             label=label,
             spot=value,
             pnl=_payoff(snapshot, value),
             description=(
-                "Both legs finish in the money"
+                "Both legs finish in the money at maximum loss"
                 if label == "risk-off"
                 else "Short strike is exposed to pin risk"
                 if label == "pin-zone"
@@ -185,10 +222,23 @@ def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
     short_itm = distance < 0
     in_pin_zone = distance < 1.25
     expiry_pressure = dte == 0 and scenario.minutes_to_close <= 120
-    hold_allowed = account_ready and quote_ready and not (
+    hold_allowed = account_ready and quote_ready and risk_ready and not (
         expiry_pressure or short_itm or buying_power < assignment_notional * 0.25
     )
-    close_allowed = account_ready and market_ready and quote_ready and width_ready
+    # Closing risk remains available even when the competition or buying-power gate fails.
+    close_allowed = (
+        snapshot.account.paper
+        and snapshot.account.options_trading_level >= 3
+        and snapshot.account.status.upper() in {"ACTIVE", "PAPER_ONLY"}
+        and not snapshot.account.trading_blocked
+        and market_ready
+        and expiry_order_window
+        and snapshot.open_order_count == 0
+        and quote_ready
+        and width_ready
+        and 0 < position.entry_credit < width
+        and close_funded
+    )
     roll_distance = _short_distance_pct_for_roll(snapshot, spot)
     roll_quote_age = (
         max(
@@ -212,8 +262,10 @@ def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
     roll_allowed = bool(
         roll
         and close_allowed
+        and account_ready
         and roll_quote_ready
         and buying_power_ready
+        and roll_funded
         and roll_net_credit is not None
         and roll_net_credit >= 0.05
         and roll_max_loss is not None
@@ -235,10 +287,16 @@ def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
     close_blockers = []
     if not market_ready:
         close_blockers.append("Options market is closed")
+    if snapshot.open_order_count:
+        close_blockers.append("A broker order is already working")
+    if not expiry_order_window:
+        close_blockers.append("Inside the expiry-day order cutoff buffer")
     if not account_ready:
         close_blockers.append("Paper account or options level check failed")
     if not quote_ready:
         close_blockers.append("Quotes are stale")
+    if not close_funded:
+        close_blockers.append("Insufficient options buying power for close debit")
 
     roll_blockers = list(close_blockers)
     if roll is None:
@@ -251,6 +309,8 @@ def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
         roll_blockers.append("New short strike leaves less than 0.75% spot clearance")
     if not buying_power_ready:
         roll_blockers.append("Insufficient options buying-power reserve")
+    if not roll_funded:
+        roll_blockers.append("Insufficient options buying power for rolled spread")
 
     hold_risk = min(100, int(35 + max(0, 1.5 - distance) * 24 + (45 if expiry_pressure else 0)))
     close_risk = min(100, max(5, int(20 + close_debit / max(width, 0.01) * 15)))
@@ -312,12 +372,31 @@ def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
         ),
     ]
 
+    legal_actions = [outcome for outcome in outcomes if outcome.allowed]
     if expiry_pressure and roll_allowed:
         policy_action = Action.ROLL
     elif (expiry_pressure or short_itm or not buying_power_ready) and close_allowed:
         policy_action = Action.CLOSE
-    else:
+    elif legal_actions:
         policy_action = Action.HOLD if hold_allowed else Action.CLOSE
+    else:
+        outcomes.append(
+            ActionOutcome(
+                action=Action.STAND_DOWN,
+                allowed=True,
+                risk_score=100,
+                immediate_cashflow=0,
+                locked_or_max_pnl=-max_loss,
+                assignment_notional=assignment_notional,
+                headline="Escalate an unmanaged expiry incident",
+                detail=(
+                    "No safe automated order is legal. The worker stops adding risk and "
+                    "records the incident for broker reconciliation."
+                ),
+                blockers=[*close_blockers, *hold_blockers],
+            )
+        )
+        policy_action = Action.STAND_DOWN
 
     urgency = (
         "critical"
@@ -333,6 +412,7 @@ def evaluate(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
 
     return Evaluation(
         evaluated_at=datetime.now(UTC),
+        lifecycle_state=snapshot.lifecycle_state(),
         scenario=scenario,
         effective_spot=spot,
         effective_buying_power=buying_power,
@@ -356,3 +436,155 @@ def _short_distance_pct_for_roll(snapshot: DeskSnapshot, spot: float) -> float:
     if roll.strategy == "bull_put_credit":
         return (spot - roll.short_leg.strike) / spot * 100
     return (roll.short_leg.strike - spot) / spot * 100
+
+
+def _evaluate_flat(snapshot: DeskSnapshot, scenario: ScenarioRequest) -> Evaluation:
+    spot = round(snapshot.spot * (1 + scenario.spot_shift_pct / 100), 2)
+    buying_power = round(
+        snapshot.account.options_buying_power * scenario.buying_power_pct / 100, 2
+    )
+    candidate = snapshot.entry_candidate
+    competition_ready = (
+        abs(snapshot.account.starting_equity - 100_000) < 0.01
+        and snapshot.account.starting_equity_verified
+    )
+    account_ready = (
+        snapshot.account.paper
+        and snapshot.account.options_trading_level >= 3
+        and snapshot.account.status.upper() in {"ACTIVE", "PAPER_ONLY"}
+        and not snapshot.account.trading_blocked
+        and competition_ready
+    )
+    candidate_ready = bool(
+        candidate
+        and candidate.max_loss <= snapshot.account.equity * 0.005
+        and candidate.max_loss <= buying_power
+        and candidate.short_clearance_pct >= 1.0
+        and 2 <= candidate.dte <= 7
+        and _entry_quotes_ready(snapshot, candidate)
+    )
+    open_allowed = bool(
+        account_ready
+        and snapshot.market_open
+        and snapshot.open_order_count == 0
+        and not snapshot.portfolio_issues
+        and candidate_ready
+    )
+    blockers: list[str] = []
+    if not snapshot.market_open:
+        blockers.append("Options market is closed")
+    if snapshot.open_order_count:
+        blockers.append("A broker order is already working")
+    blockers.extend(snapshot.portfolio_issues)
+    if not competition_ready:
+        blockers.append("Fresh $100K competition account is not verified")
+    if candidate is None:
+        blockers.append("No SPY canary passed trend, liquidity, and risk filters")
+    elif not candidate_ready:
+        blockers.append("The SPY canary failed DTE, clearance, or 0.5% risk limits")
+
+    max_loss = candidate.max_loss if candidate else 0
+    outcomes = [
+        ActionOutcome(
+            action=Action.OPEN,
+            allowed=open_allowed,
+            risk_score=(
+                min(100, max(5, int(max_loss / snapshot.account.equity * 10_000)))
+                if candidate
+                else 100
+            ),
+            immediate_cashflow=(candidate.open_credit * 100 if candidate else 0),
+            locked_or_max_pnl=-max_loss,
+            assignment_notional=(
+                candidate.short_leg.strike * 100 * candidate.quantity if candidate else 0
+            ),
+            headline="Open one managed SPY canary",
+            detail=(
+                candidate.rationale
+                if candidate
+                else "The deterministic scanner did not find a qualifying canary."
+            ),
+            blockers=blockers,
+        ),
+        ActionOutcome(
+            action=Action.STAND_DOWN,
+            allowed=True,
+            risk_score=0,
+            immediate_cashflow=0,
+            locked_or_max_pnl=0,
+            assignment_notional=0,
+            headline="Keep the account flat",
+            detail=(
+                "No qualifying canary is available; preserving capital is an autonomous action."
+                if not open_allowed
+                else "A valid canary exists, but standing down remains the zero-risk alternative."
+            ),
+        ),
+    ]
+    gates = [
+        GateResult(
+            key="paper-lock",
+            label="Paper endpoint lock",
+            passed=snapshot.account.paper,
+            detail="Account is paper-only" if snapshot.account.paper else "Live account rejected",
+        ),
+        GateResult(
+            key="competition-account",
+            label="$100K competition account",
+            passed=competition_ready,
+            detail=f"Starting equity ${snapshot.account.starting_equity:,.2f}",
+        ),
+        GateResult(
+            key="account-flat",
+            label="Flat broker book",
+            passed=not snapshot.portfolio_issues,
+            detail=(
+                "No positions require reconciliation"
+                if not snapshot.portfolio_issues
+                else "; ".join(snapshot.portfolio_issues)
+            ),
+        ),
+        GateResult(
+            key="working-orders",
+            label="No working orders",
+            passed=snapshot.open_order_count == 0,
+            detail=f"{snapshot.open_order_count} open broker order(s)",
+        ),
+        GateResult(
+            key="entry-canary",
+            label="SPY canary qualified",
+            passed=candidate_ready,
+            detail=(
+                f"{candidate.strategy}; {candidate.dte} DTE; ${candidate.max_loss:,.0f} max loss"
+                if candidate
+                else "No candidate"
+            ),
+        ),
+    ]
+    return Evaluation(
+        evaluated_at=datetime.now(UTC),
+        lifecycle_state=snapshot.lifecycle_state(),
+        scenario=scenario,
+        effective_spot=spot,
+        effective_buying_power=buying_power,
+        dte=candidate.dte if candidate else 0,
+        short_distance_pct=candidate.short_clearance_pct if candidate else None,
+        close_debit=None,
+        roll_open_credit=None,
+        roll_net_credit=None,
+        max_loss=max_loss,
+        gates=gates,
+        outcomes=outcomes,
+        policy_action=Action.OPEN if open_allowed else Action.STAND_DOWN,
+        urgency="nominal",
+    )
+
+
+def _entry_quotes_ready(snapshot: DeskSnapshot, candidate) -> bool:
+    for leg in (candidate.long_leg, candidate.short_leg):
+        if leg.quote.bid <= 0 or leg.quote.ask <= leg.quote.bid:
+            return False
+        age = (snapshot.as_of - leg.quote.timestamp).total_seconds()
+        if age < -2 or age > 120:
+            return False
+    return True

@@ -5,8 +5,22 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      LASTSAFE_DATABASE_PATH: /data/lastsafe.db
+      LASTSAFE_EVIDENCE_PATH: /data/competition-evidence.json
     volumes:
       - lastsafe-data:/data
+  worker:
+    build: .
+    command: ["lastsafe-worker"]
+    env_file:
+      - .env
+    environment:
+      LASTSAFE_DATABASE_PATH: /data/lastsafe.db
+      LASTSAFE_EVIDENCE_PATH: /data/competition-evidence.json
+    volumes:
+      - lastsafe-data:/data
+    restart: unless-stopped
 
 volumes:
   lastsafe-data:

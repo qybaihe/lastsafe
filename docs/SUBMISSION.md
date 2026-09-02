@@ -18,6 +18,11 @@ account. As a spread approaches expiry, LastSafe maps the position into its poss
 account states and compares three legal actions: hold, close, or roll to a later expiration in
 one atomic four-leg order.
 
+To prove a complete P&L lifecycle rather than depend on a manually seeded position, LastSafe
+can begin from cash with one tightly bounded SPY canary. A private autonomous worker then
+repeatedly observes, opens or stands down, monitors, enters the expiry airlock, and verifies the
+broker's terminal book after close or roll.
+
 The product combines an AI judgment layer with deterministic authority. The model can choose
 only among actions that already passed hard checks for paper mode, options level, session,
 quote freshness, bounded loss, buying power, strike clearance, and conservative roll credit.
@@ -29,6 +34,10 @@ clock, equity history, option quotes, and chains. It executes two-leg closes and
 through the official Alpaca CLI with idempotent client order IDs. Every snapshot, decision,
 command, and receipt enters a SHA-256-linked ledger so a restart cannot silently rewrite the
 story.
+
+Each broker-backed run also produces a sanitized evidence packet with an account fingerprint,
+code revision, parent order ID, fill fields, resulting-position verification, per-incident P&L
+attribution, and an explicitly modeled managed-versus-unmanaged Airlock Value.
 
 The public experience includes an interactive expiry runway: judges can move spot through the
 short strike, consume buying-power reserve, and advance the clock to see the legal action set

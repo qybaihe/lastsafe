@@ -54,6 +54,8 @@ Use one large screenshot of the expiry runway. Annotate:
 - Alpaca CLI: paper-only two-leg close and four-leg roll.
 - Alpaca CLI: machine-readable agent tool, order execution, and reconciliation by client ID.
 - Dedicated fresh `$100,000` paper account.
+- Private autonomous worker: scheduled cycles, terminal-order monitoring, position verification.
+- Evidence packet: fill IDs, attributed P&L, run hash, and Airlock Value counterfactual.
 
 ## Slide 8 - Testable Result
 

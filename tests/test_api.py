@@ -29,8 +29,14 @@ def test_replay_api_end_to_end(tmp_path: Path) -> None:
         script = client.get("/app.js")
         styles = client.get("/styles.css")
         fixture = client.get("/replay.json")
+        evidence = client.get("/api/evidence")
 
-    assert health.json() == {"status": "ok", "mode": "replay", "paper": "locked"}
+    assert health.json() == {
+        "status": "ok",
+        "mode": "replay",
+        "paper": "locked",
+        "worker": None,
+    }
     assert bootstrap.status_code == 200
     assert bootstrap.json()["evaluation"]["policy_action"] == "ROLL"
     assert run.status_code == 200
@@ -42,6 +48,8 @@ def test_replay_api_end_to_end(tmp_path: Path) -> None:
     assert script.status_code == 200
     assert styles.status_code == 200
     assert fixture.json()["source"] == "replay"
+    assert evidence.status_code == 200
+    assert evidence.json()["schema_version"] == "lastsafe.competition-evidence.v1"
 
 
 def test_execution_token_protects_runs_when_enabled(tmp_path: Path) -> None:
@@ -62,3 +70,30 @@ def test_execution_token_protects_runs_when_enabled(tmp_path: Path) -> None:
 
     assert denied.status_code == 403
     assert allowed.status_code == 200
+
+
+def test_competition_enrollment_always_requires_operator_token(tmp_path: Path) -> None:
+    app = create_app(Settings(database_path=tmp_path / "enroll.db"))
+
+    with TestClient(app) as client:
+        response = client.post("/api/competition/enroll")
+
+    assert response.status_code == 403
+
+
+def test_health_degrades_for_error_worker_heartbeat(tmp_path: Path) -> None:
+    settings = Settings(database_path=tmp_path / "health.db")
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        app.state.service.store.set_metadata(
+            "worker_heartbeat",
+            {
+                "status": "error",
+                "updated_at": "2026-09-01T00:00:00Z",
+                "owner": "worker",
+            },
+        )
+        response = client.get("/health")
+
+    assert response.json()["status"] == "degraded"

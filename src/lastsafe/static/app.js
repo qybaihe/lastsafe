@@ -82,7 +82,7 @@ async function staticRequest(url, options = {}) {
         execution_enabled: false,
         llm_configured: false,
         alpaca_configured: false,
-        audit_chain_valid: true,
+        audit_chain_valid: await verifyStaticChain(runs),
         audit_chain_length: String(runs.length),
       },
     };
@@ -100,8 +100,21 @@ async function staticRequest(url, options = {}) {
     localStorage.setItem(staticLedgerKey, JSON.stringify(nextRuns));
     return record;
   }
-  if (url.startsWith("/api/runs")) return runs.slice(0, 8);
+  if (url.startsWith("/api/runs")) return runs;
   throw new Error(`Unsupported static route: ${url}`);
+}
+
+async function verifyStaticChain(runs) {
+  for (let index = 0; index < runs.length; index += 1) {
+    const current = runs[index];
+    const expectedPrevious = runs[index + 1]?.record_hash || "GENESIS";
+    if (current.previous_hash !== expectedPrevious) return false;
+    const candidate = structuredClone(current);
+    const storedHash = candidate.record_hash;
+    candidate.record_hash = "pending";
+    if ((await sha256(JSON.stringify(candidate))) !== storedHash) return false;
+  }
+  return true;
 }
 
 function evaluateStatic(snapshot, input) {
@@ -165,10 +178,17 @@ function evaluateStatic(snapshot, input) {
   const shortItm = distance < 0;
   const pinZone = distance < 1.25;
   const expiryPressure = dte === 0 && scenarioValue.minutes_to_close <= 120;
+  const expiryOrderWindow = !(dte === 0 && scenarioValue.minutes_to_close < 35);
   const holdAllowed =
     accountReady &&
     !(expiryPressure || shortItm || buyingPower < assignmentNotional * 0.25);
-  const closeAllowed = accountReady && snapshot.market_open && riskReady;
+  const closeFunded = buyingPower >= closeDebit * 100 * position.quantity;
+  const closeAllowed =
+    accountReady &&
+    snapshot.market_open &&
+    riskReady &&
+    expiryOrderWindow &&
+    closeFunded;
   const rollAllowed = Boolean(
     roll &&
       closeAllowed &&
@@ -205,6 +225,8 @@ function evaluateStatic(snapshot, input) {
     rollBlockers.push("New short strike leaves less than 0.75% spot clearance");
   if (!buyingPowerReady)
     rollBlockers.push("Insufficient options buying-power reserve");
+  if (!expiryOrderWindow)
+    rollBlockers.push("Inside the expiry-day order cutoff buffer");
   const closePnl = round(
     (position.entry_credit - closeDebit) * 100 * position.quantity,
   );
@@ -263,7 +285,7 @@ function evaluateStatic(snapshot, input) {
       terminal_states: [],
     },
   ];
-  const policyAction =
+  let policyAction =
     expiryPressure && rollAllowed
       ? "ROLL"
       : (expiryPressure || shortItm || !buyingPowerReady) && closeAllowed
@@ -271,6 +293,30 @@ function evaluateStatic(snapshot, input) {
         : holdAllowed
           ? "HOLD"
           : "CLOSE";
+  if (
+    !outcomes.some(
+      (outcome) => outcome.action === policyAction && outcome.allowed,
+    )
+  ) {
+    outcomes.push({
+      action: "STAND_DOWN",
+      allowed: true,
+      risk_score: 100,
+      immediate_cashflow: 0,
+      locked_or_max_pnl: -maxLoss,
+      assignment_notional: assignmentNotional,
+      headline: "Escalate an unmanaged expiry incident",
+      detail:
+        "No safe automated order is legal. The replay records the incident for broker reconciliation.",
+      blockers: [
+        ...(expiryOrderWindow
+          ? []
+          : ["Inside the expiry-day order cutoff buffer"]),
+      ],
+      terminal_states: [],
+    });
+    policyAction = "STAND_DOWN";
+  }
   return {
     evaluated_at: new Date().toISOString(),
     scenario: scenarioValue,
@@ -304,8 +350,10 @@ function evaluateStatic(snapshot, input) {
       {
         key: "market-session",
         label: "Options session open",
-        passed: true,
-        detail: `${scenarioValue.minutes_to_close} minutes until close`,
+        passed: expiryOrderWindow,
+        detail: expiryOrderWindow
+          ? `${scenarioValue.minutes_to_close} minutes until close`
+          : "Inside the expiry-day order cutoff buffer",
       },
       {
         key: "quote-freshness",
@@ -367,7 +415,7 @@ async function createStaticRun(snapshot, evaluation, execute, runs) {
   };
   const clientOrderId = await stableClientOrderId(action, snapshot);
   const execution =
-    !execute || action === "HOLD"
+    !execute || ["HOLD", "STAND_DOWN"].includes(action)
       ? {
           status: "not-requested",
           action,
@@ -377,7 +425,7 @@ async function createStaticRun(snapshot, evaluation, execute, runs) {
           submitted_at: null,
           broker_status: null,
           detail: execute
-            ? "HOLD is an autonomous no-order action."
+            ? `${action} is an autonomous no-order action.`
             : "No order requested; decision is recorded for audit.",
           raw: {},
         }
@@ -392,7 +440,57 @@ async function createStaticRun(snapshot, evaluation, execute, runs) {
           detail:
             "GitHub Pages replay simulated the exact paper CLI payload; no broker request was sent.",
           raw: {},
+          position_verified: false,
+          lifecycle: [
+            {
+              at: new Date().toISOString(),
+              event: "replay_submitted",
+              status: "simulated",
+            },
+          ],
         };
+  const closeDebit = evaluation.close_debit;
+  const realized =
+    closeDebit == null
+      ? null
+      : round(
+          (snapshot.position.entry_credit - closeDebit) *
+            100 *
+            snapshot.position.quantity,
+        );
+  const baseline = terminalPayoff(snapshot.position, evaluation.effective_spot);
+  const attribution = {
+    basis_credit: round(snapshot.position.entry_credit * 100),
+    close_debit: closeDebit == null ? null : round(closeDebit * 100),
+    old_spread_realized_pnl: execute ? realized : null,
+    new_spread_open_credit:
+      execute && action === "ROLL"
+        ? round(snapshot.roll_candidate.open_credit * 100)
+        : null,
+    new_spread_unrealized_pnl: null,
+    account_total_pnl: snapshot.account.total_pnl,
+    other_account_movement:
+      !execute || realized == null
+        ? null
+        : round(snapshot.account.total_pnl - realized),
+  };
+  const shortItm = evaluation.short_distance_pct < 0;
+  const actionApplied = execute && ["CLOSE", "ROLL"].includes(action);
+  const counterfactual = {
+    status: "modeled",
+    baseline: "Unmanaged spread held to the displayed terminal spot",
+    baseline_pnl: baseline,
+    managed_pnl: execute ? (realized ?? baseline) : baseline,
+    airlock_value: execute ? round((realized ?? baseline) - baseline) : 0,
+    assignment_notional_avoided:
+      actionApplied && shortItm
+        ? snapshot.position.short_leg.strike * 100 * snapshot.position.quantity
+        : 0,
+    buying_power_released:
+      execute && action === "CLOSE" ? evaluation.max_loss : 0,
+    limitation:
+      "Modeled at the replay spot; excludes early assignment, broker liquidation and alternate fills.",
+  };
   const record = {
     id: `run_${Date.now().toString(36)}`,
     created_at: new Date().toISOString(),
@@ -401,6 +499,9 @@ async function createStaticRun(snapshot, evaluation, execute, runs) {
     evaluation,
     decision,
     execution,
+    attribution,
+    counterfactual,
+    trigger: "manual",
     previous_hash: runs[0]?.record_hash || "GENESIS",
     record_hash: "pending",
   };
@@ -522,26 +623,38 @@ function render() {
   $("#drawdown").className = "negative";
   $("#optionsLevel").textContent =
     `LEVEL ${snapshot.account.options_trading_level}`;
-  $("#feedLabel").textContent =
-    snapshot.position.short_leg.quote.feed.toUpperCase();
+  const activePosition = snapshot.position;
+  const activeEntry = snapshot.entry_candidate;
+  const activeShort = activePosition?.short_leg || activeEntry?.short_leg;
+  $("#feedLabel").textContent = activeShort?.quote.feed.toUpperCase() || "—";
 
   const severity = evaluation.urgency.toUpperCase();
   $("#severityBadge").textContent = severity;
   $("#severityBadge").className = `severity ${evaluation.urgency}`;
-  const shortStrike = snapshot.position.short_leg.strike;
-  const longStrike = snapshot.position.long_leg.strike;
+  if (!activePosition) {
+    renderFlat(snapshot, evaluation);
+    renderDecisions();
+    renderEquity();
+    renderLatestRun();
+    $("#chainStatus").textContent = capabilities.audit_chain_valid
+      ? `CHAIN VERIFIED · ${capabilities.audit_chain_length} RUNS`
+      : "CHAIN FAILED";
+    $("#chainStatus").className = capabilities.audit_chain_valid
+      ? "positive"
+      : "negative";
+    return;
+  }
+  const shortStrike = activePosition.short_leg.strike;
+  const longStrike = activePosition.long_leg.strike;
   const strategyName =
-    snapshot.position.strategy === "bull_put_credit"
+    activePosition.strategy === "bull_put_credit"
       ? "PUT CREDIT"
       : "CALL CREDIT";
   $("#positionTitle").textContent =
-    `${snapshot.position.underlying} ${shortStrike}/${longStrike} ${strategyName}`;
+    `${activePosition.underlying} ${shortStrike}/${longStrike} ${strategyName}`;
   $("#positionPnl").textContent =
-    `ENTRY +${money(snapshot.position.entry_credit * 100)}`;
-  $("#legs").innerHTML = [
-    snapshot.position.short_leg,
-    snapshot.position.long_leg,
-  ]
+    `ENTRY +${money(activePosition.entry_credit * 100)}`;
+  $("#legs").innerHTML = [activePosition.short_leg, activePosition.long_leg]
     .map(
       (leg) => `
     <div class="leg ${leg.position_side}">
@@ -551,13 +664,11 @@ function render() {
     </div>`,
     )
     .join("");
-  $("#entryDate").textContent = new Date(snapshot.position.opened_at)
+  $("#entryDate").textContent = new Date(activePosition.opened_at)
     .toLocaleDateString("en-US", { month: "short", day: "2-digit" })
     .toUpperCase();
   $("#airlockTime").textContent = `${evaluation.scenario.minutes_to_close} MIN`;
-  $("#expiryDate").textContent = shortDate(
-    snapshot.position.short_leg.expiration,
-  );
+  $("#expiryDate").textContent = shortDate(activePosition.short_leg.expiration);
   $("#runwayProgress").style.width =
     `${Math.max(44, Math.min(96, 100 - evaluation.scenario.minutes_to_close / 4))}%`;
   $("#spotLabel").textContent = `SPOT ${money(evaluation.effective_spot, 2)}`;
@@ -595,6 +706,60 @@ function render() {
   $("#chainStatus").className = capabilities.audit_chain_valid
     ? "positive"
     : "negative";
+}
+
+function renderFlat(snapshot, evaluation) {
+  const candidate = snapshot.entry_candidate;
+  $("#positionTitle").textContent = candidate
+    ? `${candidate.underlying} ${candidate.short_leg.strike}/${candidate.long_leg.strike} CANARY`
+    : "FLAT · NO QUALIFIED CANARY";
+  $("#positionPnl").textContent = candidate
+    ? `MAX LOSS ${money(candidate.max_loss)}`
+    : "CAPITAL PRESERVED";
+  $("#legs").innerHTML = candidate
+    ? [candidate.short_leg, candidate.long_leg]
+        .map(
+          (leg) => `
+      <div class="leg ${leg.position_side}">
+        <span class="leg-badge">${leg.position_side.toUpperCase()}</span>
+        <b>${safe(leg.symbol)}</b>
+        <small>${money(leg.quote.bid, 2)} × ${money(leg.quote.ask, 2)}</small>
+      </div>`,
+        )
+        .join("")
+    : '<div class="leg"><b>Broker book is flat</b><small>The worker will scan again on its next cycle.</small></div>';
+  $("#entryDate").textContent = "FLAT";
+  $("#airlockTime").textContent = `${evaluation.scenario.minutes_to_close} MIN`;
+  $("#expiryDate").textContent = candidate
+    ? shortDate(candidate.short_leg.expiration)
+    : "—";
+  $("#spotLabel").textContent = `SPOT ${money(evaluation.effective_spot, 2)}`;
+  $("#payoffChart").innerHTML =
+    '<div class="ledger-empty">Campaign begins only when the SPY canary clears every entry gate.</div>';
+  $("#spotShiftValue").textContent = signedPct(
+    evaluation.scenario.spot_shift_pct,
+    1,
+  );
+  $("#buyingPowerValue").textContent =
+    `${evaluation.scenario.buying_power_pct}%`;
+  $("#minutesCloseValue").textContent =
+    `${evaluation.scenario.minutes_to_close} min`;
+  $("#shortDistance").textContent =
+    evaluation.short_distance_pct == null
+      ? "—"
+      : signedPct(evaluation.short_distance_pct);
+  $("#assignmentNotional").textContent = candidate
+    ? money(candidate.short_leg.strike * 100)
+    : money(0);
+  $("#optionsBp").textContent = money(evaluation.effective_buying_power);
+  $("#gateList").innerHTML = evaluation.gates
+    .map(
+      (gate) => `
+    <div class="gate ${gate.passed ? "" : "fail"}">
+      <i></i><b>${safe(gate.label)}</b><span>${safe(gate.detail)}</span>
+    </div>`,
+    )
+    .join("");
 }
 
 function renderPayoff(points, spot) {
@@ -647,15 +812,18 @@ function renderDecisions() {
     .map((outcome) => {
       const recommended = outcome.action === evaluation.policy_action;
       const metricLabel =
-        outcome.action === "HOLD"
-          ? "MAX PROFIT"
-          : outcome.action === "CLOSE"
-            ? "LOCKED P&L"
-            : "NEW MAX LOSS";
-      const metricValue =
-        outcome.action === "ROLL"
-          ? money(outcome.locked_or_max_pnl)
-          : signedMoney(outcome.locked_or_max_pnl);
+        outcome.action === "OPEN"
+          ? "MAX LOSS"
+          : outcome.action === "STAND_DOWN"
+            ? "CAPITAL AT RISK"
+            : outcome.action === "HOLD"
+              ? "MAX PROFIT"
+              : outcome.action === "CLOSE"
+                ? "LOCKED P&L"
+                : "NEW MAX LOSS";
+      const metricValue = ["ROLL", "OPEN"].includes(outcome.action)
+        ? money(Math.abs(outcome.locked_or_max_pnl))
+        : signedMoney(outcome.locked_or_max_pnl);
       return `
       <article class="decision-card ${recommended ? "recommended" : ""} ${outcome.allowed ? "" : "blocked"}">
         <div class="decision-card-head">
@@ -710,6 +878,7 @@ function renderLatestRun() {
       ? "MODEL READY"
       : "DETERMINISTIC FALLBACK";
     $("#chainHash").textContent = "GENESIS";
+    renderProof(null);
     return;
   }
   if (!sameScenario(run.evaluation.scenario, state.evaluation.scenario)) {
@@ -718,6 +887,7 @@ function renderLatestRun() {
       `Scenario changed. Policy preview: ${state.evaluation.policy_action}. Run the airlock to record this decision.`;
     $("#agentModel").textContent = "PENDING NEW RUN";
     $("#chainHash").textContent = run.record_hash.slice(0, 24);
+    renderProof(null);
     return;
   }
   $("#agentAction").textContent = run.decision.action;
@@ -726,6 +896,7 @@ function renderLatestRun() {
     `${run.decision.source.toUpperCase()} · ${(run.decision.confidence * 100).toFixed(0)}%`;
   $("#chainHash").textContent = run.record_hash.slice(0, 24);
   renderReceipt(run.execution);
+  renderProof(run);
 }
 
 function sameScenario(left, right) {
@@ -741,12 +912,17 @@ function sameScenario(left, right) {
 
 function renderReceipt(receipt) {
   $("#receiptStatus").textContent = receipt.status.toUpperCase();
-  $("#receiptStatus").className =
-    receipt.status === "failed" || receipt.status === "blocked"
-      ? "negative"
-      : ["submitted", "simulated", "recovered"].includes(receipt.status)
-        ? "positive"
-        : "";
+  $("#receiptStatus").className = [
+    "failed",
+    "blocked",
+    "rejected",
+    "expired",
+    "unknown",
+  ].includes(receipt.status)
+    ? "negative"
+    : ["submitted", "simulated", "recovered", "filled"].includes(receipt.status)
+      ? "positive"
+      : "";
   const lines = [];
   if (receipt.command_preview) lines.push(`$ ${receipt.command_preview}`);
   lines.push(`\nstatus: ${receipt.status}`);
@@ -759,9 +935,55 @@ function renderReceipt(receipt) {
   $("#receiptOutput").textContent = lines.join("\n");
 }
 
+function renderProof(run) {
+  const counterfactual = run?.counterfactual;
+  const execution = run?.execution;
+  $("#proofStatus").textContent =
+    run?.mode === "alpaca" ? "PAPER BROKER EVIDENCE" : "MODELED REPLAY";
+  $("#airlockValue").textContent = counterfactual
+    ? signedMoney(counterfactual.airlock_value)
+    : "—";
+  $("#assignmentAvoided").textContent = counterfactual
+    ? money(counterfactual.assignment_notional_avoided)
+    : "—";
+  $("#buyingPowerReleased").textContent = counterfactual
+    ? money(counterfactual.buying_power_released)
+    : "—";
+  $("#brokerTerminal").textContent = execution
+    ? execution.position_verified
+      ? "VERIFIED"
+      : execution.status.toUpperCase()
+    : "—";
+
+  const timeline = [
+    Boolean(run),
+    Boolean(run?.decision),
+    Boolean(execution?.client_order_id),
+    Boolean(execution?.position_verified),
+  ];
+  $("#incidentTimeline")
+    .querySelectorAll("div")
+    .forEach((element, index) => {
+      element.className = timeline[index]
+        ? "done"
+        : ["failed", "rejected", "unknown"].includes(execution?.status) &&
+            index >= 2
+          ? "failed"
+          : "";
+    });
+}
+
 async function loadRuns() {
   state.runs = await request("/api/runs?limit=8");
   renderLedger();
+  if (state.capabilities.audit_chain_valid != null) {
+    $("#chainStatus").textContent = state.capabilities.audit_chain_valid
+      ? `CHAIN VERIFIED · ${state.capabilities.audit_chain_length} RUNS`
+      : "CHAIN FAILED";
+    $("#chainStatus").className = state.capabilities.audit_chain_valid
+      ? "positive"
+      : "negative";
+  }
 }
 
 function renderLedger() {

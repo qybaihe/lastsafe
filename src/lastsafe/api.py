@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
@@ -9,7 +10,15 @@ from fastapi.staticfiles import StaticFiles
 
 from .alpaca import AlpacaError
 from .config import Settings
-from .models import BootstrapResponse, RunRecord, RunRequest, ScenarioRequest
+from .evidence import read_packet
+from .models import (
+    BootstrapResponse,
+    EvidencePacket,
+    RunRecord,
+    RunRequest,
+    ScenarioRequest,
+    WorkerHeartbeat,
+)
 from .service import LastSafeService
 from .store import RunStore
 
@@ -51,6 +60,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if x_lastsafe_execution_token != active_settings.execution_token:
             raise HTTPException(status_code=403, detail="Invalid execution token")
 
+    def authorize_operator(
+        request: Request, x_lastsafe_execution_token: str | None
+    ) -> None:
+        active_settings: Settings = request.app.state.settings
+        if not active_settings.execution_token:
+            raise HTTPException(status_code=403, detail="Operator token is not configured")
+        if x_lastsafe_execution_token != active_settings.execution_token:
+            raise HTTPException(status_code=403, detail="Invalid execution token")
+
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
@@ -68,8 +86,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(STATIC_DIR / "replay.json", media_type="application/json")
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "mode": settings.mode, "paper": "locked"}
+    async def health() -> dict[str, str | dict | None]:
+        heartbeat = store.get_metadata("worker_heartbeat")
+        status = "ok"
+        if isinstance(heartbeat, dict):
+            updated = datetime.fromisoformat(str(heartbeat["updated_at"]).replace("Z", "+00:00"))
+            stale = (datetime.now(UTC) - updated).total_seconds() > (
+                settings.worker_interval_seconds * 2 + 60
+            )
+            if heartbeat.get("status") in {"degraded", "error"} or stale:
+                status = "degraded"
+        elif settings.mode == "alpaca":
+            status = "degraded"
+        chain_valid, _ = store.verify()
+        if not chain_valid or store.list_pending_intents():
+            status = "degraded"
+        return {
+            "status": status,
+            "mode": settings.mode,
+            "paper": "locked",
+            "worker": heartbeat,
+        }
+
+    @app.get("/api/worker", response_model=WorkerHeartbeat)
+    async def worker_status() -> WorkerHeartbeat:
+        heartbeat = store.get_metadata("worker_heartbeat")
+        if not isinstance(heartbeat, dict):
+            raise HTTPException(status_code=404, detail="Worker has not recorded a heartbeat")
+        return WorkerHeartbeat.model_validate(heartbeat)
+
+    @app.get("/api/evidence", response_model=EvidencePacket)
+    async def evidence() -> EvidencePacket:
+        packet = read_packet(settings.evidence_path)
+        if packet is None:
+            raise HTTPException(status_code=404, detail="No evidence packet has been generated")
+        return packet
+
+    @app.post("/api/competition/enroll")
+    async def enroll_competition_account(
+        request: Request,
+        x_lastsafe_execution_token: str | None = Header(default=None),
+    ) -> dict:
+        authorize_operator(request, x_lastsafe_execution_token)
+        try:
+            return await service.enroll_competition_account()
+        except AlpacaError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get("/api/bootstrap", response_model=BootstrapResponse)
     async def bootstrap(

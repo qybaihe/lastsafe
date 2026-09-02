@@ -77,6 +77,10 @@
         <div><span>FEED</span><strong id="feedLabel">—</strong></div>
       </section>
 
+      <div class="replay-disclosure" id="replayDisclosure">
+        SEEDED REPLAY · NOT COMPETITION P&amp;L · NO BROKER REQUESTS
+      </div>
+
       <section class="workspace" id="airlock">
         <aside class="runway-panel panel">
           <div class="panel-heading">
@@ -253,8 +257,10 @@
       <section class="evidence-section">
         <div class="section-title-row">
           <div>
-            <p class="section-index">04 / ALPACA EVIDENCE</p>
-            <h2>No invisible execution.</h2>
+            <p class="section-index" id="evidenceLabel">
+              04 / ALPACA PAYLOAD PREVIEW
+            </p>
+            <h2 id="evidenceTitle">No invisible execution.</h2>
           </div>
           <div class="stack-pills">
             <span>TRADING API</span><span>MARKET DATA</span><span>CLI</span
@@ -295,6 +301,45 @@
         </div>
         <div class="ledger-table" id="ledgerTable">
           <div class="ledger-empty">No airlock runs recorded yet.</div>
+        </div>
+      </section>
+
+      <section class="evidence-section proof-section" id="proof">
+        <div class="section-title-row">
+          <div>
+            <p class="section-index">06 / CAMPAIGN PROOF</p>
+            <h2>What the Airlock changed.</h2>
+          </div>
+          <div class="ledger-proof">
+            <span id="proofStatus">MODELED REPLAY</span>
+          </div>
+        </div>
+        <div class="proof-grid">
+          <article>
+            <span>AIRLOCK VALUE</span><strong id="airlockValue">—</strong>
+            <p>Managed result minus unmanaged expiry baseline.</p>
+          </article>
+          <article>
+            <span>ASSIGNMENT AVOIDED</span
+            ><strong id="assignmentAvoided">—</strong>
+            <p>Underlying notional removed from the expiry path.</p>
+          </article>
+          <article>
+            <span>BUYING POWER RELEASED</span
+            ><strong id="buyingPowerReleased">—</strong>
+            <p>Defined-risk capital released by a verified close.</p>
+          </article>
+          <article>
+            <span>BROKER TERMINAL STATE</span
+            ><strong id="brokerTerminal">—</strong>
+            <p>Fill is incomplete until resulting positions agree.</p>
+          </article>
+        </div>
+        <div class="incident-timeline" id="incidentTimeline">
+          <div><i></i><span>OBSERVED</span></div>
+          <div><i></i><span>DECIDED</span></div>
+          <div><i></i><span>SUBMITTED</span></div>
+          <div><i></i><span>POSITION VERIFIED</span></div>
         </div>
       </section>
     </main>

@@ -11,8 +11,8 @@ SYSTEM_PROMPT = """You are LastSafe, an options expiry operations agent.
 Choose exactly one action from the deterministic set supplied by the application.
 You may choose only an action marked allowed. Never invent a contract, quantity, price, or order.
 Prioritize avoiding accidental exercise/assignment and preserve defined risk. Return JSON only:
-{"action":"HOLD|CLOSE|ROLL","confidence":0.0,"thesis":"...","evidence":["..."],
-"rejected_actions":{"HOLD":"...","CLOSE":"...","ROLL":"..."}}
+{"action":"OPEN|HOLD|CLOSE|ROLL|STAND_DOWN","confidence":0.0,"thesis":"...",
+"evidence":["..."],"rejected_actions":{"ACTION":"reason"}}
 Keep the thesis under 45 words and cite only supplied facts."""
 
 
@@ -28,15 +28,27 @@ class DecisionService:
             "paper_account": snapshot.account.paper,
             "equity": snapshot.account.equity,
             "options_buying_power": evaluation.effective_buying_power,
-            "underlying": snapshot.position.underlying,
-            "strategy": snapshot.position.strategy,
+            "lifecycle_state": evaluation.lifecycle_state,
+            "underlying": (
+                snapshot.position.underlying
+                if snapshot.position
+                else snapshot.entry_candidate.underlying
+                if snapshot.entry_candidate
+                else "SPY"
+            ),
+            "strategy": (
+                snapshot.position.strategy
+                if snapshot.position
+                else snapshot.entry_candidate.strategy
+                if snapshot.entry_candidate
+                else None
+            ),
             "effective_spot": evaluation.effective_spot,
             "dte": evaluation.dte,
             "minutes_to_close": evaluation.scenario.minutes_to_close,
             "short_distance_pct": evaluation.short_distance_pct,
             "close_debit": evaluation.close_debit,
             "roll_net_credit": evaluation.roll_net_credit,
-            "policy_action": evaluation.policy_action,
             "outcomes": [
                 {
                     "action": outcome.action,
@@ -118,7 +130,11 @@ class DecisionService:
             ),
             evidence=[
                 f"DTE {evaluation.dte}; {evaluation.scenario.minutes_to_close} minutes to close",
-                f"Short-strike clearance {evaluation.short_distance_pct:+.2f}%",
+                (
+                    f"Short-strike clearance {evaluation.short_distance_pct:+.2f}%"
+                    if evaluation.short_distance_pct is not None
+                    else "No qualifying short strike"
+                ),
                 f"Options buying power ${evaluation.effective_buying_power:,.0f}",
             ],
             rejected_actions=rejected,

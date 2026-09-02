@@ -2,8 +2,9 @@
 
 **The autonomous options expiry airlock. The agent that starts after the trade fills.**
 
-LastSafe monitors defined-risk option verticals as they approach expiration. It maps each
-position into possible terminal account states, compares `HOLD`, `CLOSE`, and `ROLL`, and
+LastSafe opens one tightly bounded SPY canary when the paper account is flat, then monitors
+defined-risk option verticals as they approach expiration. It maps each position into possible
+terminal account states, compares `HOLD`, `CLOSE`, and `ROLL`, and
 uses an AI decision layer only after deterministic policy has removed unsafe actions. Orders
 are constructed as Alpaca multi-leg paper orders and submitted through the official Alpaca
 CLI. Every decision and receipt enters a restart-safe, hash-linked ledger.
@@ -34,15 +35,19 @@ timestamp.
 ## Product Flow
 
 1. Read the Alpaca paper account, positions, clock, equity history, option quotes, and chain.
-2. Pair supported long/short legs into the nearest-expiry defined-risk vertical.
-3. Build three explicit landing states: hold, close, or atomically roll.
-4. Apply hard gates for paper mode, options level, market session, quote freshness, defined
+2. From a flat account, select at most one SPY credit vertical using a five-day trend,
+   SMA20 agreement, quote, delta, DTE, clearance, and 0.5% maximum-loss gates.
+3. Otherwise require exactly one fully paired 1:1 vertical; unmatched or unexplained legs fail
+   closed.
+4. Build three explicit landing states: hold, close, or atomically roll.
+5. Apply hard gates for paper mode, account identity, options level, market session, quote freshness, defined
    risk, buying power, new-strike clearance, and net roll credit.
-5. Give the LLM only the legal action set. It cannot choose symbols, quantity, limit price, or
+6. Give the LLM only the legal action set. It cannot choose symbols, quantity, limit price, or
    account.
-6. Submit a two-leg close or four-leg roll through Alpaca CLI with a unique
+7. Submit an entry/close or four-leg roll through Alpaca CLI with a stable
    `client_order_id`.
-7. Persist the snapshot, policy output, model rationale, exact command, and broker receipt in
+8. Poll the order to terminal status, verify resulting positions through CLI, and persist the
+   snapshot, rationale, command, broker lifecycle, P&L attribution, expiry counterfactual, and receipt in
    a SHA-256-linked SQLite ledger.
 
 ## Interface Design
@@ -56,7 +61,7 @@ elements are generated locally; there is no stock footage or placeholder product
 
 | Requirement | LastSafe implementation |
 | --- | --- |
-| Autonomous AI trading agent | Agent selects and executes an expiry action without manual order construction |
+| Autonomous AI trading agent | Private worker opens or stands down, manages expiry, and verifies the resulting broker book without browser interaction |
 | Alpaca Trading API | Account, positions, clock, history, option quotes, chains, and MLeg orders |
 | MCP or CLI | Official Alpaca CLI is the required agent tool and the only order write path |
 | Options strategy | Vertical spreads with autonomous close and four-leg expiration rolls |
@@ -74,6 +79,10 @@ execution is not implemented.
 - An LLM can select only an action that deterministic code marked `allowed`.
 - Only paired, same-expiration 1:1 verticals are supported.
 - Orders use unique client IDs for idempotency and audit correlation.
+- Canceled, expired, or rejected attempts receive a new numbered client ID; working/filled
+  attempts are recovered instead of blindly retried.
+- A long-lived worker runs cycles without a browser and uses a SQLite single-flight lease.
+- A fill is not called complete until Alpaca CLI confirms the resulting position state.
 - Public execution can be protected with `LASTSAFE_EXECUTION_TOKEN`.
 - If no later contract passes selection, the agent can close but cannot invent a roll.
 
@@ -83,7 +92,8 @@ Requirements: Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --extra dev
-uv run uvicorn lastsafe.main:app --reload
+uv run --env-file .env uvicorn lastsafe.main:app --reload
+uv run --env-file .env lastsafe-worker --once
 ```
 
 Open <http://localhost:8000>. Replay mode works without credentials and supports the complete
@@ -113,6 +123,7 @@ LASTSAFE_EXECUTION_ENABLED=false
 ALPACA_API_KEY=your_paper_key
 ALPACA_SECRET_KEY=your_paper_secret
 ALPACA_DATA_FEED=indicative
+LASTSAFE_EXPECTED_ACCOUNT_ID=the_exact_competition_account_uuid
 ```
 
 Start with execution disabled. LastSafe will read the account and construct command previews,
@@ -125,12 +136,25 @@ but it will not submit orders. Before enabling paper execution, verify all of th
 - The selected option feed and timestamps are shown correctly.
 - A separate development account has completed a submit/cancel/fill smoke test.
 
+Bind the pristine competition account exactly once, before any order:
+
+```bash
+uv run --env-file .env lastsafe-worker --enroll-account
+```
+
+Enrollment stores an immutable account ID, `$100,000` cash/equity snapshot, zero-position and
+zero-order observation, options level, timestamp, and preflight hash in the private database.
+
 Then configure a private worker:
 
 ```dotenv
 LASTSAFE_EXECUTION_ENABLED=true
 LASTSAFE_EXECUTION_TOKEN=a-long-random-token
 ```
+
+Run the autonomous lifecycle loop with `uv run --env-file .env lastsafe-worker`. It wakes every five minutes
+by default, asks Alpaca's clock and broker state on every cycle, and records no-order cycles as
+first-class decisions.
 
 The UI does not collect this token. Keep the public demo in replay/read-only mode and invoke
 the protected run endpoint from an authenticated operator or scheduled worker.
@@ -158,6 +182,8 @@ blocked action or malformed output, the fallback takes over and logs a policy ov
 | `POST /api/runs` | Run the agent and optionally request a paper order |
 | `GET /api/runs` | Read the append-only decision ledger |
 | `GET /api/runs/latest` | Latest agent decision and receipt |
+| `GET /api/worker` | Last autonomous worker heartbeat |
+| `GET /api/evidence` | Sanitized machine-readable competition evidence packet |
 | `GET /api/docs` | OpenAPI explorer |
 
 Example replay run:
@@ -192,6 +218,11 @@ docker run --rm -p 8000:8000 lastsafe
 Implemented:
 
 - Bull put and bear call credit vertical detection.
+- Flat-account SPY canary selection and paper-only opening orders.
+- Autonomous worker with a single-flight lease and heartbeat.
+- Terminal order polling, timeout cancellation, numbered retries, and position verification.
+- Per-incident P&L attribution and managed-versus-unmanaged Airlock Value.
+- Sanitized competition evidence packet bound to the code revision and run hash.
 - Expiry terminal-state payoff mapping.
 - Scenario controls for spot, buying-power reserve, and time to close.
 - Deterministic `HOLD`, `CLOSE`, and `ROLL` eligibility.

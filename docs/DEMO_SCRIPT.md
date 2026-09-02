@@ -56,3 +56,7 @@ and broker result in a hash-linked restart-safe ledger. It is not another entry 
 the agent that gets an options position safely home."
 
 End on the ledger and the tagline.
+
+Show the final Campaign Proof panel: agent-attributed P&L, modeled Airlock Value, assignment
+notional avoided, and the broker terminal state. State clearly whether each field is REPLAY,
+MODELED, or PAPER BROKER EVIDENCE.

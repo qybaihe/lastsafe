@@ -5,8 +5,11 @@
 1. Register every team member on lablab.ai and create/join the event team.
 2. Build and test with a separate development paper account.
 3. Create a new dedicated paper account for judging.
-4. Confirm initial equity and cash are exactly `$100,000` before any order.
-5. Record the account ID in a private submission checklist. Never commit API keys.
+4. Before any order, set `LASTSAFE_EXPECTED_ACCOUNT_ID` and run
+   `uv run --env-file .env lastsafe-worker --enroll-account`. This binds the database only if cash and equity are
+   exactly `$100,000`, options level is 3, and positions/open orders are both empty.
+5. Preserve the generated preflight hash and account ID in the private submission checklist.
+   Never commit API keys.
 6. Confirm `options_trading_level == 3` and account trading is not blocked.
 7. Install Alpaca CLI `v0.0.14` or pin the tested event version.
 8. Run `alpaca doctor` and independently confirm paper endpoints.
@@ -23,15 +26,15 @@ Use the development account, not the competition account:
 
 ## Competition Run
 
-1. Establish one supported 1:1 SPY or QQQ credit vertical in the fresh paper account.
-2. Keep maximum loss below 1% of current equity.
-3. Run LastSafe first with execution disabled and inspect the exact command.
-4. Enable paper execution only on a private worker protected by a long token.
-5. Capture account response, option quotes with timestamps, agent decision, CLI output, order
+1. Start the account flat. LastSafe may open only one SPY canary after its trend, SMA20,
+   quote, delta, DTE, clearance and 0.5% risk gates all pass.
+2. Run LastSafe first with execution disabled and inspect the exact command.
+3. Enable paper execution only on a private worker protected by a long token.
+4. Capture account response, option quotes with timestamps, agent decision, CLI output, order
    response, and resulting positions.
-6. Record a clean screen capture while US options are open. Do this no later than Thursday,
+5. Record a clean screen capture while US options are open. Do this no later than Thursday,
    September 3; the event closes Friday at 11:00 ET.
-7. Disable execution after evidence is captured. Keep the public URL in replay mode.
+6. Disable execution after evidence is captured. Keep the public URL in replay mode.
 
 ## Failure Handling
 
